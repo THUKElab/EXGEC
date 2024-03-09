@@ -5,26 +5,26 @@ import torch.nn as nn
 from fairseq import utils
 from fairseq.models import register_model, register_model_architecture
 from fairseq.models.transformer import (
-    TransformerEncoder,
     TransformerDecoder,
+    TransformerEncoder,
     TransformerModel,
     base_architecture,
 )
 from fairseq.models.transformer.transformer_base import Embedding
 from fairseq.modules import FairseqDropout
-from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
 
 from utils import get_logger
+
 from .egec_language_pair_dataset import ERROR_TYPE_TOKENS, TAGGING_LABELS
 
 LOGGER = get_logger(__name__)
 
 
 class ExplainableGECTransformerEncoder(TransformerEncoder):
-    """ Revised by yejh on 2023.08.10
-        1) Introduce src_dropout
-        2) Map pointing index
+    """Revised by yejh on 2023.08.10
+    1) Introduce src_dropout
+    2) Map pointing index
     """
 
     def __init__(self, args, dictionary, embed_tokens, return_fc=False):
@@ -43,7 +43,7 @@ class ExplainableGECTransformerEncoder(TransformerEncoder):
         return embedding_tokens * (1 / keep_prob)
 
     def forward_embedding(
-            self, src_tokens, token_embedding: Optional[torch.Tensor] = None
+        self, src_tokens, token_embedding: Optional[torch.Tensor] = None
     ):
         # embed tokens and positions
         if token_embedding is None:
@@ -61,11 +61,11 @@ class ExplainableGECTransformerEncoder(TransformerEncoder):
         return x, embed
 
     def forward(
-            self,
-            src_tokens,
-            src_lengths: Optional[torch.Tensor] = None,
-            return_all_hiddens: bool = False,
-            token_embeddings: Optional[torch.Tensor] = None,
+        self,
+        src_tokens,
+        src_lengths: Optional[torch.Tensor] = None,
+        return_all_hiddens: bool = False,
+        token_embeddings: Optional[torch.Tensor] = None,
     ):
         if self.cfg.explanation_setting == "infusion":
             dict_size = len(self.dictionary)
@@ -77,7 +77,9 @@ class ExplainableGECTransformerEncoder(TransformerEncoder):
                 pad_len = src_tokens.eq(pad_idx).sum(-1, keepdim=True)  # [B, 1]
                 pointing_index = pointing_index + pad_len
 
-            pointing_index = pointing_index.masked_fill(pointing_index.lt(0), 0)  # [B, T]
+            pointing_index = pointing_index.masked_fill(
+                pointing_index.lt(0), 0
+            )  # [B, T]
             # [B, TS], [B, T] -> [B, T]
             pointing_tokens = src_tokens.gather(index=pointing_index, dim=1)
             src_tokens = torch.where(pointing_mask, pointing_tokens, src_tokens)
@@ -98,21 +100,21 @@ class ExplainableGECTransformerEncoder(TransformerEncoder):
 
 
 class ExplainableGECTransformerDecoder(TransformerDecoder):
-    """ Revised by yejh on 2023.08.10
-        1) Incorporating Pointer Network
-        2) Extend dictionary to support error type classification
+    """Revised by yejh on 2023.08.10
+    1) Incorporating Pointer Network
+    2) Extend dictionary to support error type classification
     """
 
     def __init__(
-            self,
-            cfg,
-            dictionary,
-            embed_tokens,
-            no_encoder_attn=False,
-            output_projection=None,
-            sequence_tagging=False,
-            use_encoder_mlp=False,
-            use_decoder_mlp=False,
+        self,
+        cfg,
+        dictionary,
+        embed_tokens,
+        no_encoder_attn=False,
+        output_projection=None,
+        sequence_tagging=False,
+        use_encoder_mlp=False,
+        use_decoder_mlp=False,
     ):
         super().__init__(
             cfg,
@@ -177,16 +179,16 @@ class ExplainableGECTransformerDecoder(TransformerDecoder):
         return tag_logits
 
     def forward(
-            self,
-            prev_output_tokens,
-            encoder_out: Optional[Dict[str, List[Tensor]]] = None,
-            incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
-            features_only: bool = False,
-            full_context_alignment: bool = False,
-            alignment_layer: Optional[int] = None,
-            alignment_heads: Optional[int] = None,
-            src_lengths: Optional[Any] = None,
-            return_all_hiddens: bool = False,
+        self,
+        prev_output_tokens,
+        encoder_out: Optional[Dict[str, List[Tensor]]] = None,
+        incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        features_only: bool = False,
+        full_context_alignment: bool = False,
+        alignment_layer: Optional[int] = None,
+        alignment_heads: Optional[int] = None,
+        src_lengths: Optional[Any] = None,
+        return_all_hiddens: bool = False,
     ):
         # Sequence Tagging (Run only during training and evaluating, rather than inference)
         tag_logits = None
@@ -206,10 +208,14 @@ class ExplainableGECTransformerDecoder(TransformerDecoder):
                 # pad_len = src_tokens.eq(pad_idx).sum(-1, keepdim=True)  # [B, 1]
                 # pointing_index = pointing_index + pad_len
 
-            pointing_index = pointing_index.masked_fill(pointing_index.lt(0), 0)  # [B, T]
+            pointing_index = pointing_index.masked_fill(
+                pointing_index.lt(0), 0
+            )  # [B, T]
             # [B, TS], [B, T] -> [B, T]
             pointing_tokens = src_tokens.gather(index=pointing_index, dim=1)
-            prev_output_tokens = torch.where(pointing_mask, pointing_tokens, prev_output_tokens)
+            prev_output_tokens = torch.where(
+                pointing_mask, pointing_tokens, prev_output_tokens
+            )
 
         x, extra = self.extract_features(
             prev_output_tokens,
@@ -225,15 +231,15 @@ class ExplainableGECTransformerDecoder(TransformerDecoder):
         return x, extra, tag_logits
 
     def output_layer(
-            self,
-            features,
-            encoder_out: Optional[Dict[str, List[Tensor]]] = None,
-            bpe_first: Optional[Tensor] = None,
+        self,
+        features,
+        encoder_out: Optional[Dict[str, List[Tensor]]] = None,
+        bpe_first: Optional[Tensor] = None,
     ):
-        """ Project features to the vocabulary and pointing (src_tokens) size.
-            @param features: [B, LT, H]: outputs of Decoder
-            @param encoder_out: output of Encoder
-            @param bpe_first: [B, LS_word] 显示每个单词第一个 BPE
+        """Project features to the vocabulary and pointing (src_tokens) size.
+        @param features: [B, LT, H]: outputs of Decoder
+        @param encoder_out: output of Encoder
+        @param bpe_first: [B, LS_word] 显示每个单词第一个 BPE
         """
         # Project features to the vocabulary size
         vocab_logits = self.output_projection(features)  # [B, LT, V]
@@ -257,49 +263,57 @@ class ExplainableGECTransformerDecoder(TransformerDecoder):
             x = self.decoder_mlp(x)
 
         enc = (enc + encoder_embedding) / 2
-        point_scores = torch.einsum('blh,bnh->bln', x, enc)  # [B, LT, LS]
+        point_scores = torch.einsum("blh,bnh->bln", x, enc)  # [B, LT, LS]
 
         point_scores = point_scores.masked_fill(
             encoder_padding_mask.unsqueeze(1),  # [B, 1, LS]
-            -1e+3,
+            -1e3,
         )  # [B, LT, LS]
 
         logits = torch.concat((vocab_logits, point_scores), dim=-1)  # [B, LT, V+LS]
         return logits
 
     def get_normalized_probs_scriptable(
-            self,
-            net_output: Tuple[Tensor, Optional[Dict[str, List[Optional[Tensor]]]]],
-            log_probs: bool,
-            sample: Optional[Dict[str, Tensor]] = None,
+        self,
+        net_output: Tuple[Tensor, Optional[Dict[str, List[Optional[Tensor]]]]],
+        log_probs: bool,
+        sample: Optional[Dict[str, Tensor]] = None,
     ):
-        """ Revised by yejh on 2023.09.10
-            Get normalized probabilities (or log probs) from a net's output.
+        """Revised by yejh on 2023.09.10
+        Get normalized probabilities (or log probs) from a net's output.
         """
         if len(net_output) == 2:
-            return super().get_normalized_probs_scriptable(net_output, log_probs, sample)
+            return super().get_normalized_probs_scriptable(
+                net_output, log_probs, sample
+            )
 
         logits, tag_logits = net_output[0], net_output[2]
         if log_probs:
             return (
                 utils.log_softmax(logits, dim=-1, onnx_trace=self.onnx_trace),
-                utils.log_softmax(tag_logits, dim=-1, onnx_trace=self.onnx_trace)
-                if tag_logits is not None else None,
+                (
+                    utils.log_softmax(tag_logits, dim=-1, onnx_trace=self.onnx_trace)
+                    if tag_logits is not None
+                    else None
+                ),
             )
         else:
             return (
                 utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace),
-                utils.softmax(tag_logits, dim=-1, onnx_trace=self.onnx_trace)
-                if tag_logits is not None else None,
+                (
+                    utils.softmax(tag_logits, dim=-1, onnx_trace=self.onnx_trace)
+                    if tag_logits is not None
+                    else None
+                ),
             )
 
 
 @register_model("explainable_gec_transformer")
 class ExplainableGECTransformer(TransformerModel):
-    """ 相比传统的 Transformer 的改动：
-        1) 使用 ExplainableGECTransformerEncoder
-        2) 使用 ExplainableGECTransformerDecoder
-        3) 提供 set_beam_size 方法支持 gec_dev 实时评估 F0.5
+    """相比传统的 Transformer 的改动：
+    1) 使用 ExplainableGECTransformerEncoder
+    2) 使用 ExplainableGECTransformerDecoder
+    3) 提供 set_beam_size 方法支持 gec_dev 实时评估 F0.5
     """
 
     @classmethod
@@ -307,22 +321,27 @@ class ExplainableGECTransformer(TransformerModel):
         super().add_args(parser)
         parser.add_argument(
             "--source-word-dropout",
-            type=float, metavar="D", default=0.2,
+            type=float,
+            metavar="D",
+            default=0.2,
             help="dropout probability for source word dropout",
         )
         parser.add_argument(
             "--sequence-tagging",
-            action="store_true", default=False,
+            action="store_true",
+            default=False,
             help="carry on sequence tagging task",
         )
         parser.add_argument(
             "--use-encoder-mlp",
-            action="store_true", default=False,
+            action="store_true",
+            default=False,
             help="use mlp to further handle the encoder output",
         )
         parser.add_argument(
             "--use-decoder-mlp",
-            action="store_true", default=False,
+            action="store_true",
+            default=False,
             help="use mlp to further handle the decoder output",
         )
 
@@ -370,10 +389,10 @@ class ExplainableGECTransformer(TransformerModel):
             self.encoder.reorder_encoder_out = self.encoder._reorder_encoder_out
 
     def get_targets(self, sample, net_output):
-        """ Revised by yejh on 2023.08.18
-            Get targets from either the sample or the net's output.
-            1) Correction Target
-            2) Tagging Target
+        """Revised by yejh on 2023.08.18
+        Get targets from either the sample or the net's output.
+        1) Correction Target
+        2) Tagging Target
         """
         return (
             sample["target"],
@@ -423,19 +442,20 @@ class ExplainableGECTransformer(TransformerModel):
 #         x = self.out_proj(x)
 #         return x
 
+
 class TaggingHead(nn.Module):
-    """ Head for token-level classification tasks. """
+    """Head for token-level classification tasks."""
 
     def __init__(
-            self,
-            input_dim,
-            inner_dim,
-            num_classes,
-            activation_fn,
-            dropout,
-            q_noise=0,
-            qn_block_size=8,
-            do_spectral_norm=False,
+        self,
+        input_dim,
+        inner_dim,
+        num_classes,
+        activation_fn,
+        dropout,
+        q_noise=0,
+        qn_block_size=8,
+        do_spectral_norm=False,
     ):
         super().__init__()
         self.dense = nn.Linear(input_dim, inner_dim)
@@ -462,7 +482,9 @@ class TaggingHead(nn.Module):
         return x
 
 
-@register_model_architecture("explainable_gec_transformer", "explainable_gec_transformer")
+@register_model_architecture(
+    "explainable_gec_transformer", "explainable_gec_transformer"
+)
 def gec_transformer_base_architecture(args):
     base_architecture(args)
     args.source_word_dropout = getattr(args, "source_word_dropout", 0.0)

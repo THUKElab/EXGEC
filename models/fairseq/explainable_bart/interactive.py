@@ -10,13 +10,13 @@ Translate raw text with a trained model. Batches data on-the-fly.
 import ast
 import fileinput
 import logging
+import math
 import os
 import sys
 import time
 from argparse import Namespace
 from collections import namedtuple
 
-import math
 import numpy as np
 import torch
 from fairseq import checkpoint_utils, distributed_utils, options, tasks, utils
@@ -63,14 +63,15 @@ Translation = namedtuple("Translation", "src_str hypos pos_scores alignments")
 
 
 def buffered_read(
-        input_source_files=None,
-        input_source_lines=None,
-        input_explanation_files=None,
-        input_explanation_lines=None,
-        buffer_size=10000,
+    input_source_files=None,
+    input_source_lines=None,
+    input_explanation_files=None,
+    input_explanation_lines=None,
+    buffer_size=10000,
 ):
-    assert (input_source_files and input_explanation_files) \
-           or (input_source_lines and input_explanation_lines)
+    assert (input_source_files and input_explanation_files) or (
+        input_source_lines and input_explanation_lines
+    )
 
     if isinstance(input_source_files, str):
         input_source_files = [input_source_files]
@@ -79,8 +80,12 @@ def buffered_read(
 
     if input_source_files:
         data_iter = zip(
-            fileinput.input(files=input_source_files, openhook=fileinput.hook_encoded("utf-8")),
-            fileinput.input(files=input_explanation_files, openhook=fileinput.hook_encoded("utf-8")),
+            fileinput.input(
+                files=input_source_files, openhook=fileinput.hook_encoded("utf-8")
+            ),
+            fileinput.input(
+                files=input_explanation_files, openhook=fileinput.hook_encoded("utf-8")
+            ),
         )
     else:
         data_iter = zip(input_source_lines, input_explanation_lines)
@@ -98,9 +103,9 @@ def buffered_read(
 
 
 def make_batches(sents, explanations, cfg, task, max_positions, encode_fn):
-    """ Revised by yejh on 2023.08.14
-        1) Input both sents and explanations
-        2) Build src_tokens with explanations if explanation_setting == infusion
+    """Revised by yejh on 2023.08.14
+    1) Input both sents and explanations
+    2) Build src_tokens with explanations if explanation_setting == infusion
     """
 
     def encode_fn_target(x):
@@ -128,7 +133,9 @@ def make_batches(sents, explanations, cfg, task, max_positions, encode_fn):
     else:
         constraints_tensor = None
 
-    sent_tokens, sent_lengths = task.get_interactive_tokens_and_lengths(sents, encode_fn)
+    sent_tokens, sent_lengths = task.get_interactive_tokens_and_lengths(
+        sents, encode_fn
+    )
 
     explanation_tokens, explanation_lengths = [], []
     # if task.cfg.explanation_setting == "infusion":
@@ -168,50 +175,52 @@ def make_batches(sents, explanations, cfg, task, max_positions, encode_fn):
 
 
 def inference(
-        cfg,
-        task,
-        generator,
-        src_dict,
-        tgt_dict,
-        encode_fn,
-        decode_fn,
-        max_positions,
-        input_source_files=None,
-        input_source_lines=None,
-        input_explanation_files=None,
-        input_explanation_lines=None,
-        buffer_size=5000,
-        use_cuda=True,
-        align_dict=None,
-        sout=sys.stdout,
+    cfg,
+    task,
+    generator,
+    src_dict,
+    tgt_dict,
+    encode_fn,
+    decode_fn,
+    max_positions,
+    input_source_files=None,
+    input_source_lines=None,
+    input_explanation_files=None,
+    input_explanation_lines=None,
+    buffer_size=5000,
+    use_cuda=True,
+    align_dict=None,
+    sout=sys.stdout,
 ):
-    """ Created by yejh on 2023.08.14
-        return a list of samples
-        [
-            {
-                "src_str": str,
-                "detok_src_str": str,
-                "hypo_str": str,
-                "detok_hypo_sent: str,
-                "hypo_error_type": str,
-                "hypo_evidence_idx": List[int],
-            },
-        ]
+    """Created by yejh on 2023.08.14
+    return a list of samples
+    [
+        {
+            "src_str": str,
+            "detok_src_str": str,
+            "hypo_str": str,
+            "detok_hypo_sent: str,
+            "hypo_error_type": str,
+            "hypo_evidence_idx": List[int],
+        },
+    ]
     """
     returns = []
     start_time, start_id, total_translate_time = time.time(), 0, 0
 
     for inputs in buffered_read(
-            input_source_files=input_source_files,
-            input_source_lines=input_source_lines,
-            input_explanation_files=input_explanation_files,
-            input_explanation_lines=input_explanation_lines,
-            buffer_size=buffer_size,
+        input_source_files=input_source_files,
+        input_source_lines=input_source_lines,
+        input_explanation_files=input_explanation_files,
+        input_explanation_lines=input_explanation_lines,
+        buffer_size=buffer_size,
     ):
         results = []
         source_inputs = [x[0] for x in inputs]
         explanation_inputs = [x[1] for x in inputs]
-        for batch in make_batches(source_inputs, explanation_inputs, cfg, task, max_positions, encode_fn):
+        for batch in make_batches(
+            source_inputs, explanation_inputs, cfg, task, max_positions, encode_fn
+        ):
             bsz = batch.src_tokens.size(0)
             src_tokens = batch.src_tokens
             src_lengths = batch.src_lengths
@@ -245,7 +254,10 @@ def inference(
 
             translate_start_time = time.time()
             translations = task.inference_step(
-                generator, generator.model.models, sample, constraints=constraints,
+                generator,
+                generator.model.models,
+                sample,
+                constraints=constraints,
             )
             translate_time = time.time() - translate_start_time
             total_translate_time += translate_time
@@ -254,7 +266,9 @@ def inference(
                 list_constraints = [unpack_constraints(c) for c in constraints]
             for i, (idx, hypos) in enumerate(zip(batch.ids.tolist(), translations)):
                 src_tokens_i = utils.strip_pad(src_tokens[i], tgt_dict.pad())
-                tag_preds_i = tag_preds[i][:len(src_tokens_i) - 1] if tag_preds else None
+                tag_preds_i = (
+                    tag_preds[i][: len(src_tokens_i) - 1] if tag_preds else None
+                )
                 constraints = list_constraints[i]
                 results.append(
                     (
@@ -270,7 +284,9 @@ def inference(
                 )
 
         # sort output to match input order
-        for id_, src_tokens, hypos, tag_pred, info in sorted(results, key=lambda x: x[0]):
+        for id_, src_tokens, hypos, tag_pred, info in sorted(
+            results, key=lambda x: x[0]
+        ):
             src_str, detok_src_sent = "", ""
             if src_dict is not None:
                 # src_str: [Source] <sep> [ERROR_TYPE] <unk> <unk>
@@ -284,27 +300,37 @@ def inference(
                     src_sent = src_str_list[:sep_idx]
                     detok_src_sent = decode_fn(" ".join(src_sent))
 
-                    src_evidence_idx = [i for i in src_tokens.int().cpu().tolist() if i >= len(src_dict)]
-                    detok_src_evidence_idx = [i - len(src_dict) for i in src_evidence_idx]
+                    src_evidence_idx = [
+                        i for i in src_tokens.int().cpu().tolist() if i >= len(src_dict)
+                    ]
+                    detok_src_evidence_idx = [
+                        i - len(src_dict) for i in src_evidence_idx
+                    ]
 
                     detok_src_str = f"{detok_src_sent} {SEPERATOR_TOKEN}"
                     format_split = cfg.task.explanation_format.split("-")
                     if format_split[0] == "type":
                         detok_src_str += " " + src_str_list[sep_idx + 1]
                         if detok_src_evidence_idx:
-                            detok_src_str += " " + " ".join(list(map(str, detok_src_evidence_idx)))
+                            detok_src_str += " " + " ".join(
+                                list(map(str, detok_src_evidence_idx))
+                            )
                     elif format_split[0] == "evidence":
-                        detok_src_str += " " + " ".join(list(map(str, detok_src_evidence_idx)))
+                        detok_src_str += " " + " ".join(
+                            list(map(str, detok_src_evidence_idx))
+                        )
                         if len(format_split) > 1 and format_split[1] == "type":
                             detok_src_str += " " + src_str_list[-1]
                 else:
                     detok_src_str = detok_src_sent = decode_fn(src_str)
 
-                returns.append({
-                    "src_str": src_str,
-                    "detok_src_str": detok_src_str,
-                    "tag_pred": tag_pred,
-                })
+                returns.append(
+                    {
+                        "src_str": src_str,
+                        "detok_src_str": detok_src_str,
+                        "tag_pred": tag_pred,
+                    }
+                )
                 # print("S-{}\t{}".format(id_, src_str))
                 print("S-{}\t{}".format(id_, detok_src_str), file=sout)
                 print("W-{}\t{:.3f}\tseconds".format(id_, info["time"]), file=sout)
@@ -318,7 +344,9 @@ def inference(
                     )
 
             # Process top predictions
-            for hypo_idx, hypo in enumerate(hypos[: min(len(hypos), cfg.generation.nbest)]):
+            for hypo_idx, hypo in enumerate(
+                hypos[: min(len(hypos), cfg.generation.nbest)]
+            ):
                 # 1) Special error type tokens
                 # 2) Pointing tokens
                 hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
@@ -337,35 +365,59 @@ def inference(
                     if cfg.task.explanation_setting == "rationalization":
                         hypo_str_list = hypo_str.split()
 
-                        assert len(list(filter(lambda x: x == SEPERATOR_TOKEN, hypo_str_list))) == 1, \
-                            f"Invalid hypo: {hypo_str_list}"
+                        assert (
+                            len(
+                                list(
+                                    filter(
+                                        lambda x: x == SEPERATOR_TOKEN, hypo_str_list
+                                    )
+                                )
+                            )
+                            == 1
+                        ), f"Invalid hypo: {hypo_str_list}"
                         sep_idx = hypo_str_list.index(SEPERATOR_TOKEN)
 
-                        hypo_evidence_idx = [i for i in hypo["tokens"].int().cpu().tolist() if i >= len(src_dict)]
-                        detok_hypo_evidence_idx = [i - len(src_dict) for i in hypo_evidence_idx]
+                        hypo_evidence_idx = [
+                            i
+                            for i in hypo["tokens"].int().cpu().tolist()
+                            if i >= len(src_dict)
+                        ]
+                        detok_hypo_evidence_idx = [
+                            i - len(src_dict) for i in hypo_evidence_idx
+                        ]
 
                         hypo_str, detok_hypo_str = "", ""
                         format_split = cfg.task.explanation_format.split("-")
                         if cfg.task.explanation_before:
                             # hypo_str: [ERROR_TYPE] [EVIDENCE_INDEX] <sep> [CORRECTION]
-                            hypo_sent = hypo_str_list[sep_idx + 1:]
+                            hypo_sent = hypo_str_list[sep_idx + 1 :]
                             detok_hypo_sent = decode_fn(" ".join(hypo_sent))
                             if format_split[0] == "type":
                                 hypo_error_type = hypo_str_list[0]
                                 hypo_str += hypo_error_type
                                 detok_hypo_str += hypo_error_type
                                 if detok_hypo_evidence_idx:
-                                    hypo_str += " " + " ".join(list(map(str, hypo_evidence_idx)))
-                                    detok_hypo_str += " ".join(list(map(str, detok_hypo_evidence_idx)))
+                                    hypo_str += " " + " ".join(
+                                        list(map(str, hypo_evidence_idx))
+                                    )
+                                    detok_hypo_str += " ".join(
+                                        list(map(str, detok_hypo_evidence_idx))
+                                    )
                             elif format_split[0] == "evidence":
                                 hypo_str += " ".join(list(map(str, hypo_evidence_idx)))
-                                detok_hypo_str += " ".join(list(map(str, detok_hypo_evidence_idx)))
+                                detok_hypo_str += " ".join(
+                                    list(map(str, detok_hypo_evidence_idx))
+                                )
                                 if len(format_split) > 1 and format_split[1] == "type":
                                     hypo_error_type = hypo_str_list[sep_idx - 1]
                                     hypo_str += " " + hypo_error_type
                                     detok_hypo_str += " " + hypo_error_type
-                            hypo_str += " " + SEPERATOR_TOKEN + " " + " ".join(hypo_sent)
-                            detok_hypo_str += " " + SEPERATOR_TOKEN + " " + detok_hypo_sent
+                            hypo_str += (
+                                " " + SEPERATOR_TOKEN + " " + " ".join(hypo_sent)
+                            )
+                            detok_hypo_str += (
+                                " " + SEPERATOR_TOKEN + " " + detok_hypo_sent
+                            )
                         else:
                             # hypo_Str: [CORRECTION] <sep> [ERROR_TYPE] [EVIDENCE_INDEX]
                             hypo_sent = hypo_str_list[:sep_idx]
@@ -377,11 +429,19 @@ def inference(
                                 hypo_str += " " + hypo_error_type
                                 detok_hypo_str += " " + hypo_error_type
                                 if detok_hypo_evidence_idx:
-                                    hypo_str += " " + " ".join(list(map(str, hypo_evidence_idx)))
-                                    detok_hypo_str += " ".join(list(map(str, detok_hypo_evidence_idx)))
+                                    hypo_str += " " + " ".join(
+                                        list(map(str, hypo_evidence_idx))
+                                    )
+                                    detok_hypo_str += " ".join(
+                                        list(map(str, detok_hypo_evidence_idx))
+                                    )
                             elif format_split[0] == "evidence":
-                                hypo_str += " " + " ".join(list(map(str, hypo_evidence_idx)))
-                                detok_hypo_str += " " + " ".join(list(map(str, detok_hypo_evidence_idx)))
+                                hypo_str += " " + " ".join(
+                                    list(map(str, hypo_evidence_idx))
+                                )
+                                detok_hypo_str += " " + " ".join(
+                                    list(map(str, detok_hypo_evidence_idx))
+                                )
                                 if len(format_split) > 1 and format_split[1] == "type":
                                     hypo_error_type = hypo_str_list[-1]
                                     hypo_str += " " + hypo_error_type
@@ -391,8 +451,14 @@ def inference(
                         detok_hypo_sent = None
                         hypo_str_list = hypo_str.split()
 
-                        hypo_evidence_idx = [i for i in hypo["tokens"].int().cpu().tolist() if i >= len(src_dict)]
-                        detok_hypo_evidence_idx = [i - len(src_dict) for i in hypo_evidence_idx]
+                        hypo_evidence_idx = [
+                            i
+                            for i in hypo["tokens"].int().cpu().tolist()
+                            if i >= len(src_dict)
+                        ]
+                        detok_hypo_evidence_idx = [
+                            i - len(src_dict) for i in hypo_evidence_idx
+                        ]
 
                         hypo_str, detok_hypo_str = "", ""
                         format_split = cfg.task.explanation_format.split("-")
@@ -401,11 +467,17 @@ def inference(
                             hypo_str += hypo_error_type
                             detok_hypo_str += hypo_error_type
                             if detok_hypo_evidence_idx:
-                                hypo_str += " " + " ".join(list(map(str, hypo_evidence_idx)))
-                                detok_hypo_str += " " + " ".join(list(map(str, detok_hypo_evidence_idx)))
+                                hypo_str += " " + " ".join(
+                                    list(map(str, hypo_evidence_idx))
+                                )
+                                detok_hypo_str += " " + " ".join(
+                                    list(map(str, detok_hypo_evidence_idx))
+                                )
                         elif format_split[0] == "evidence":
                             hypo_str += " ".join(list(map(str, hypo_evidence_idx)))
-                            detok_hypo_str += " ".join(list(map(str, detok_hypo_evidence_idx)))
+                            detok_hypo_str += " ".join(
+                                list(map(str, detok_hypo_evidence_idx))
+                            )
                             if len(format_split) > 1 and format_split[1] == "type":
                                 hypo_error_type = hypo_str_list[-1]
                                 hypo_str += " " + hypo_error_type
@@ -415,16 +487,22 @@ def inference(
                 except Exception as e:
                     invalid_sample = True
                     print(e)
-                    print(f"Error hypo_tokens: {' '.join(map(str, hypo['tokens'].int().cpu().tolist()))}")
+                    print(
+                        f"Error hypo_tokens: {' '.join(map(str, hypo['tokens'].int().cpu().tolist()))}"
+                    )
 
                 if hypo_idx == 0:
-                    returns[-1].update({
-                        "invalid": invalid_sample,
-                        "hypo_tokens": ' '.join(map(str, hypo['tokens'].int().cpu().tolist())),
-                        "detok_hypo_sent": detok_hypo_sent,
-                        "hypo_error_type": hypo_error_type,
-                        "hypo_evidence_idx": detok_hypo_evidence_idx,
-                    })
+                    returns[-1].update(
+                        {
+                            "invalid": invalid_sample,
+                            "hypo_tokens": " ".join(
+                                map(str, hypo["tokens"].int().cpu().tolist())
+                            ),
+                            "detok_hypo_sent": detok_hypo_sent,
+                            "hypo_error_type": hypo_error_type,
+                            "hypo_evidence_idx": detok_hypo_evidence_idx,
+                        }
+                    )
 
                 score = hypo["score"] / math.log(2)  # convert to base 2
                 # original hypothesis (after tokenization and BPE)
@@ -475,11 +553,11 @@ def main(cfg: FairseqConfig):
         cfg.dataset.batch_size = 1
 
     assert (
-            not cfg.generation.sampling or cfg.generation.nbest == cfg.generation.beam
+        not cfg.generation.sampling or cfg.generation.nbest == cfg.generation.beam
     ), "--sampling requires --nbest to be equal to --beam"
     assert (
-            not cfg.dataset.batch_size
-            or cfg.dataset.batch_size <= cfg.interactive.buffer_size
+        not cfg.dataset.batch_size
+        or cfg.dataset.batch_size <= cfg.interactive.buffer_size
     ), "--batch-size cannot be larger than --buffer-size"
 
     logger.info(cfg)
@@ -559,22 +637,21 @@ def main(cfg: FairseqConfig):
     logger.info("NOTE: hypothesis and token scores are output in base 2")
     logger.info("Type the input sentence and press return:")
 
-    from data import Dataset, Sample, M2DataReader
-    from data_utils import (
-        load_expect_denoise,
-        evaluate_explanation,
-        evaluate_tagging,
-    )
+    from data import Dataset, M2DataReader, Sample
+    from data_utils import evaluate_explanation, evaluate_tagging, load_expect_denoise
 
     eval_data = M2DataReader().read(cfg.task.eval_gec_m2_filepath)
     eval_src = [x.source[0] for x in eval_data]
-    eval_exp = [x.strip() for x in open(cfg.task.eval_gec_exp_filepath, "r", encoding="utf-8")]
+    eval_exp = [
+        x.strip() for x in open(cfg.task.eval_gec_exp_filepath, "r", encoding="utf-8")
+    ]
     eval_raw, eval_bpe = None, None
     if cfg.task.explanation_setting in ["rationalization", "explanation"]:
         eval_raw = load_expect_denoise(cfg.task.eval_gec_raw_filepath)
         eval_bpe = []
 
         from preprocess.eng.explanation_preprocess_denoise import MultiprocessingEncoder
+
         encoder = MultiprocessingEncoder(
             encoder_json=f"{os.path.dirname(__file__)}/preprocess/eng/encoder.json",
             vocab_bpe=f"{os.path.dirname(__file__)}/preprocess/eng/vocab.bpe",
@@ -586,7 +663,11 @@ def main(cfg: FairseqConfig):
                 eval_bpe.append(src_word_bpes)
 
     # Inference
-    with open(f"{os.path.dirname(cfg.common_eval.path)}/results/output.out.nbest", "w", encoding="utf-8") as f:
+    with open(
+        f"{os.path.dirname(cfg.common_eval.path)}/results/output.out.nbest",
+        "w",
+        encoding="utf-8",
+    ) as f:
         results = inference(
             cfg,
             task,
@@ -631,7 +712,6 @@ def main(cfg: FairseqConfig):
         print(f"Evaluate Tagging: {results_tag}")
         logger.info(f"Evaluate Tagging: {results_tag}")
 
-
     if cfg.task.explanation_setting == "explanation":
         return
 
@@ -640,14 +720,17 @@ def main(cfg: FairseqConfig):
     assert len(eval_data) == len(detok_hypo_sent)
     dataset_hyp = Dataset(samples=[])
     for sample, hyp in zip(eval_data, detok_hypo_sent):
-        dataset_hyp.samples.append(Sample(
-            index=len(dataset_hyp),
-            source=sample.source.copy(),
-            target=[hyp],
-        ))
+        dataset_hyp.samples.append(
+            Sample(
+                index=len(dataset_hyp),
+                source=sample.source.copy(),
+                target=[hyp],
+            )
+        )
 
     # Evaluate Correction using GEC metric
     from metrics import ErrantEN, SystemScorer
+
     metric = ErrantEN(SystemScorer())
     score, results = metric.evaluate(dataset_hyp, eval_data)
     print(f"Evaluate Correction with {metric.__class__}: {score}")
@@ -656,6 +739,7 @@ def main(cfg: FairseqConfig):
 
 def cli_main():
     from fairseq.options import add_model_args
+
     parser = options.get_interactive_generation_parser()
 
     # Add ModelConfig to enable sequence tagging

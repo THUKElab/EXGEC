@@ -4,8 +4,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
-from utils import get_logger
 from fairseq.data import LanguagePairDataset, data_utils
+
+from utils import get_logger
 
 LOGGER = get_logger(__name__)
 SEPERATOR_TOKEN = "<sep>"

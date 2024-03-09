@@ -2,7 +2,8 @@ import itertools
 import os
 from dataclasses import dataclass, field
 
-from fairseq import utils, search
+from data import Dataset, M2DataReader, Sample
+from fairseq import search, utils
 from fairseq.data import (
     AppendTokenDataset,
     ConcatDataset,
@@ -15,54 +16,47 @@ from fairseq.data import (
 from fairseq.data.encoders.gpt2_bpe import GPT2BPE
 from fairseq.tasks import register_task
 from fairseq.tasks.translation import TranslationConfig, TranslationTask
-
-from data import M2DataReader, Dataset, Sample
 from metrics import SystemScorer
+
 from utils import get_logger
-from .data_utils import (
-    load_expect_denoise,
-    evaluate_explanation,
-    evaluate_tagging,
-)
+
+from .data_utils import evaluate_explanation, evaluate_tagging, load_expect_denoise
 from .egec_language_pair_dataset import (
-    ExplainableLanguagePairDataset,
     ERROR_TYPE_TOKENS,
+    ExplainableLanguagePairDataset,
 )
 from .interactive import inference
-from .sequence_generator import (
-    SequenceGenerator,
-    SequenceGeneratorWithAlignment,
-)
+from .sequence_generator import SequenceGenerator, SequenceGeneratorWithAlignment
 
 LOGGER = get_logger(__name__)
 
 
 def load_explainable_langpair_dataset(
-        data_path,
-        split,
-        src,
-        src_dict,
-        tgt,
-        tgt_dict,
-        combine,
-        dataset_impl,
-        upsample_primary,
-        left_pad_source,
-        left_pad_target,
-        max_source_positions,
-        # max_target_positions,
-        prepend_bos=False,
-        load_alignments=False,
-        truncate_source=False,
-        append_source_id=False,
-        num_buckets=0,
-        shuffle=True,
-        pad_to_multiple=1,
-        prepend_bos_src=None,
-        explanation_setting=None,
-        explanation_format=None,
-        explanation_before=False,
-        sequence_tagging=False,
+    data_path,
+    split,
+    src,
+    src_dict,
+    tgt,
+    tgt_dict,
+    combine,
+    dataset_impl,
+    upsample_primary,
+    left_pad_source,
+    left_pad_target,
+    max_source_positions,
+    # max_target_positions,
+    prepend_bos=False,
+    load_alignments=False,
+    truncate_source=False,
+    append_source_id=False,
+    num_buckets=0,
+    shuffle=True,
+    pad_to_multiple=1,
+    prepend_bos_src=None,
+    explanation_setting=None,
+    explanation_format=None,
+    explanation_before=False,
+    sequence_tagging=False,
 ):
     def split_exists(split, src, tgt, lang, data_path):
         filename = os.path.join(data_path, "{}.{}-{}.{}".format(split, src, tgt, lang))
@@ -111,7 +105,7 @@ def load_explainable_langpair_dataset(
         if sequence_tagging or (explanation_setting and explanation_format):
             explanation_dataset = data_utils.load_indexed_dataset(
                 path=os.path.join(data_path, "{}.{}".format(split_k, "exp")),
-                dataset_impl=dataset_impl
+                dataset_impl=dataset_impl,
             )
             if explanation_dataset is not None:
                 explanation_datasets.append(explanation_dataset)
@@ -130,13 +124,21 @@ def load_explainable_langpair_dataset(
     if len(src_datasets) == 1:
         src_dataset = src_datasets[0]
         tgt_dataset = tgt_datasets[0] if len(tgt_datasets) > 0 else None
-        explanation_dataset = explanation_datasets[0] if len(explanation_datasets) > 0 else None
+        explanation_dataset = (
+            explanation_datasets[0] if len(explanation_datasets) > 0 else None
+        )
     else:
         sample_ratios = [1] * len(src_datasets)
         sample_ratios[0] = upsample_primary
         src_dataset = ConcatDataset(src_datasets, sample_ratios)
-        tgt_dataset = ConcatDataset(tgt_datasets, sample_ratios) if len(tgt_datasets) > 0 else None
-        explanation_dataset = explanation_datasets[0] if len(explanation_datasets) > 0 else None
+        tgt_dataset = (
+            ConcatDataset(tgt_datasets, sample_ratios)
+            if len(tgt_datasets) > 0
+            else None
+        )
+        explanation_dataset = (
+            explanation_datasets[0] if len(explanation_datasets) > 0 else None
+        )
 
     if prepend_bos:
         assert hasattr(src_dict, "bos_index") and hasattr(tgt_dict, "bos_index")
@@ -167,7 +169,9 @@ def load_explainable_langpair_dataset(
             )
 
     tgt_dataset_sizes = tgt_dataset.sizes if tgt_dataset is not None else None
-    explanation_dataset_sizes = explanation_dataset.sizes if explanation_dataset is not None else None
+    explanation_dataset_sizes = (
+        explanation_dataset.sizes if explanation_dataset is not None else None
+    )
     return ExplainableLanguagePairDataset(
         src_dataset,
         src_dataset.sizes,
@@ -198,53 +202,49 @@ class ExplainableGECConfig(TranslationConfig):
         metadata={
             "choices": ["", "infusion", "rationalization", "explanation"],
             "help": "Explanation format. No explanation if empty",
-        }
+        },
     )
     explanation_format: str = field(
         default="evidence",
         metadata={
             "choices": ["type", "evidence", "type-evidence", "evidence-type"],
             "help": "Explanation format",
-        }
+        },
     )
     explanation_before: bool = field(
-        default=False,
-        metadata={"help": "Explanation position relative to the target"}
+        default=False, metadata={"help": "Explanation position relative to the target"}
     )
     # options for reporting GEC scores during validation
     eval_gec: bool = field(
-        default=False,
-        metadata={"help": "evaluation with BLEU scores"}
+        default=False, metadata={"help": "evaluation with BLEU scores"}
     )
     eval_gec_min_update: int = field(
         default=0,
-        metadata={"help": "only evaluate gec if num_updates > eval_gec_min_update"}
+        metadata={"help": "only evaluate gec if num_updates > eval_gec_min_update"},
     )
     eval_gec_m2_filepath: str = field(
         default="",
-        metadata={"help": "Evaluation M2 dataset. No evaluation if not specified"}
+        metadata={"help": "Evaluation M2 dataset. No evaluation if not specified"},
     )
     eval_gec_raw_filepath: str = field(
         default="",
-        metadata={"help": "Evaluation official dataset. No evaluation if not specified"}
+        metadata={
+            "help": "Evaluation official dataset. No evaluation if not specified"
+        },
     )
     eval_gec_exp_filepath: str = field(
-        default="",
-        metadata={"help": "Evaluation explanation filepath"}
+        default="", metadata={"help": "Evaluation explanation filepath"}
     )
-    eval_gec_output_prefix: str = field(
-        default="temp",
-        metadata={"help": ""}
-    )
+    eval_gec_output_prefix: str = field(default="temp", metadata={"help": ""})
     eval_gec_metric: str = field(
-        default="errant_eng", metadata={
+        default="errant_eng",
+        metadata={
             "help": "GEC metric",
             "choices": ["errant_eng", "errant_zho", "m2", "gleu"],
         },
     )
     eval_gec_sent_level: bool = field(
-        default=False,
-        metadata={"help": "evaluation with sentence-level metric"}
+        default=False, metadata={"help": "evaluation with sentence-level metric"}
     )
 
 
@@ -277,15 +277,24 @@ class ExplainableGECTask(TranslationTask):
                 self.bpe = GPT2BPE(self.cfg_all.bpe)
             self.eval_data = M2DataReader().read(cfg.eval_gec_m2_filepath)
             self.eval_src = [x.source[0] for x in self.eval_data]
-            self.eval_exp = [x.strip() for x in open(cfg.eval_gec_exp_filepath, "r", encoding="utf-8")]
+            self.eval_exp = [
+                x.strip()
+                for x in open(cfg.eval_gec_exp_filepath, "r", encoding="utf-8")
+            ]
 
-            if self.cfg_all.model.sequence_tagging or cfg.explanation_setting in ["rationalization", "explanation"]:
+            if self.cfg_all.model.sequence_tagging or cfg.explanation_setting in [
+                "rationalization",
+                "explanation",
+            ]:
                 # self.eval_raw = load_expect(cfg.eval_gec_raw_filepath)
                 # self.eval_raw = process_expect(self.eval_raw)
                 self.eval_raw = load_expect_denoise(cfg.eval_gec_raw_filepath)
 
                 # from .preprocess.eng.explanation_preprocess import MultiprocessingEncoder
-                from .preprocess.eng.explanation_preprocess_denoise import MultiprocessingEncoder
+                from .preprocess.eng.explanation_preprocess_denoise import (
+                    MultiprocessingEncoder,
+                )
+
                 encoder = MultiprocessingEncoder(
                     encoder_json=self.cfg_all.bpe.gpt2_encoder_json,
                     vocab_bpe=self.cfg_all.bpe.gpt2_vocab_bpe,
@@ -293,12 +302,16 @@ class ExplainableGECTask(TranslationTask):
                 encoder.initializer()
                 with open(cfg.eval_gec_raw_filepath, "r", encoding="utf-8") as f:
                     for line in f:
-                        src_word_bpes, tgt_word_bpes, _, _, _ = encoder.process_line(line)
+                        src_word_bpes, tgt_word_bpes, _, _, _ = encoder.process_line(
+                            line
+                        )
                         self.eval_bpe.append(src_word_bpes)
 
             self.build_metric(cfg)
             # build_generator 会根据 generation_args 修改 MultiheadAttention 的 beam_size
-            self.sequence_generator = self.build_generator([model], self.cfg_all.generation)
+            self.sequence_generator = self.build_generator(
+                [model], self.cfg_all.generation
+            )
             self.sequence_generator.vocab_size += 1 + len(ERROR_TYPE_TOKENS)
             self.set_beam_size(1)
         return model
@@ -306,22 +319,27 @@ class ExplainableGECTask(TranslationTask):
     def build_metric(self, cfg):
         if cfg.eval_gec_metric == "errant_eng":
             from metrics import ErrantEN
+
             self.metric = ErrantEN(SystemScorer())
         elif cfg.eval_gec_metric == "errant_zho":
             from metrics import ErrantZH
+
             from utils.pre_processors.pre_process_chinese import pre_process
+
             self.metric = ErrantZH(SystemScorer())
             self.eval_src_processed, self.eval_src_ids = pre_process(
                 self.eval_src,
-                file_vocab=os.path.join(os.path.dirname(__file__), "preprocess/zho/vocab_v2.txt"),
+                file_vocab=os.path.join(
+                    os.path.dirname(__file__), "preprocess/zho/vocab_v2.txt"
+                ),
             )
         else:
             raise NotImplementedError
 
     def load_dataset(self, split, epoch=1, combine=False, **kwargs):
-        """ Load Explainable Language Pair Dataset
-            1) Language pair
-            2) Explanation
+        """Load Explainable Language Pair Dataset
+        1) Language pair
+        2) Explanation
         """
         paths = utils.split_paths(self.cfg.data)
         assert len(paths) > 0
@@ -356,13 +374,13 @@ class ExplainableGECTask(TranslationTask):
         )
 
     def build_dataset_for_inference(
-            self,
-            sent_tokens,
-            sent_lengths,
-            constraints=None,
-            explanation_tokens=None,
-            explanation_lengths=None,
-            explanation_before=False,
+        self,
+        sent_tokens,
+        sent_lengths,
+        constraints=None,
+        explanation_tokens=None,
+        explanation_lengths=None,
+        explanation_before=False,
     ):
         return ExplainableLanguagePairDataset(
             src=sent_tokens,
@@ -386,7 +404,7 @@ class ExplainableGECTask(TranslationTask):
 
     def should_validate_gec(self, stats):
         LOGGER.debug(f"stats: {stats}")
-        return stats['num_updates'] >= self.cfg.eval_gec_min_update
+        return stats["num_updates"] >= self.cfg.eval_gec_min_update
 
     def post_validate(self, model, stats):
         if not self.should_validate_gec(stats):
@@ -394,7 +412,9 @@ class ExplainableGECTask(TranslationTask):
         # Set beam search for sequence generation
         self.set_beam_size(self.cfg_all.generation.beam)
 
-        output_filepath = f"{self.cfg.eval_gec_output_prefix}-{stats['num_updates']}.out"
+        output_filepath = (
+            f"{self.cfg.eval_gec_output_prefix}-{stats['num_updates']}.out"
+        )
         results = inference(
             cfg=self.cfg_all,
             task=self,
@@ -403,8 +423,14 @@ class ExplainableGECTask(TranslationTask):
             tgt_dict=self.target_dictionary,
             encode_fn=self.encode_fn,
             decode_fn=self.decode_fn,
-            max_positions=utils.resolve_max_positions(self.max_positions(), model.max_positions()),
-            input_source_lines=self.eval_src if self.eval_src_processed is None else self.eval_src_processed,
+            max_positions=utils.resolve_max_positions(
+                self.max_positions(), model.max_positions()
+            ),
+            input_source_lines=(
+                self.eval_src
+                if self.eval_src_processed is None
+                else self.eval_src_processed
+            ),
             input_explanation_lines=self.eval_exp,
             buffer_size=10000,
             use_cuda=not model.args.cpu,
@@ -446,6 +472,7 @@ class ExplainableGECTask(TranslationTask):
         detok_hypo_sent = [x["detok_hypo_sent"] for x in results]
         if self.eval_src_processed is not None:  # For MuCGEC
             from utils.post_processors.zho.post_process_bart import post_process
+
             detok_hypo_sent = post_process(
                 srcs=self.eval_src_processed,
                 tgts=detok_hypo_sent,
@@ -461,11 +488,13 @@ class ExplainableGECTask(TranslationTask):
         assert len(self.eval_data) == len(detok_hypo_sent)
         dataset_hyp = Dataset(samples=[])
         for sample, hyp in zip(self.eval_data, detok_hypo_sent):
-            dataset_hyp.samples.append(Sample(
-                index=len(dataset_hyp),
-                source=sample.source.copy(),
-                target=[hyp],
-            ))
+            dataset_hyp.samples.append(
+                Sample(
+                    index=len(dataset_hyp),
+                    source=sample.source.copy(),
+                    target=[hyp],
+                )
+            )
 
         # Evaluate using GEC metric
         score, results = self.metric.evaluate(dataset_hyp, self.eval_data)
@@ -478,8 +507,10 @@ class ExplainableGECTask(TranslationTask):
             save_dir = self.cfg_all.checkpoint.save_dir
             LOGGER.info(f"Save model with best score: {round(self.model_score[-1], 4)}")
             os.system(f"rm -f {os.path.join(save_dir, 'checkpoint_best_score.pt')}")
-            os.system(f"cp {os.path.join(save_dir, 'checkpoint_last.pt')} "
-                      f"{os.path.join(save_dir, 'checkpoint_best_score.pt')}")
+            os.system(
+                f"cp {os.path.join(save_dir, 'checkpoint_last.pt')} "
+                f"{os.path.join(save_dir, 'checkpoint_best_score.pt')}"
+            )
 
     def encode_fn(self, x):
         if self.tokenizer is not None:
@@ -496,15 +527,16 @@ class ExplainableGECTask(TranslationTask):
         return x
 
     def build_generator(
-            self,
-            models,
-            args,
-            seq_gen_cls=None,
-            extra_gen_cls_kwargs=None,
-            prefix_allowed_tokens_fn=None,
+        self,
+        models,
+        args,
+        seq_gen_cls=None,
+        extra_gen_cls_kwargs=None,
+        prefix_allowed_tokens_fn=None,
     ):
         if getattr(args, "score_reference", False):
             from fairseq.sequence_scorer import SequenceScorer
+
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
@@ -522,16 +554,16 @@ class ExplainableGECTask(TranslationTask):
         if prefix_allowed_tokens_fn is None:
             prefix_allowed_tokens_fn = getattr(args, "prefix_allowed_tokens_fn", None)
         if (
-                sum(
-                    int(cond)
-                    for cond in [
-                        sampling,
-                        diverse_beam_groups > 0,
-                        match_source_len,
-                        diversity_rate > 0,
-                    ]
-                )
-                > 1
+            sum(
+                int(cond)
+                for cond in [
+                    sampling,
+                    diverse_beam_groups > 0,
+                    match_source_len,
+                    diversity_rate > 0,
+                ]
+            )
+            > 1
         ):
             raise ValueError("Provided Search parameters are mutually exclusive.")
         assert sampling_topk < 0 or sampling, "--sampling-topk requires --sampling"

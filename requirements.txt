@@ -12,3 +12,4 @@ pypinyin
 tokenizers
 pydantic
 tabulate
+seqeval
