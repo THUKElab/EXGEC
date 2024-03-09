@@ -1,0 +1,14 @@
+torch
+transformers
+datasets
+fairseq
+errant
+opencc
+xmltodict
+ltp
+nltk
+Levenshtein
+pypinyin
+tokenizers
+pydantic
+tabulate
